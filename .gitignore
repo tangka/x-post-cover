@@ -1,0 +1,10 @@
+node_modules/
+.env
+debug/
+*.png
+*.bak
+public/post-data.js
+public/assets/avatar.jpg
+public/assets/codexx-qrcode.jpg
+# dist is committed — pre-built so users don't need npm install
+!dist/
