@@ -17,7 +17,7 @@ fi
 
 **If `NEEDS_INSTALL`:** Run:
 ```bash
-git clone https://github.com/tangkakakaka/x-post-cover "${X_COVER_HOME:-$HOME/.x-post-cover}"
+git clone https://github.com/tangka/x-post-cover "${X_COVER_HOME:-$HOME/.x-post-cover}"
 ```
 No `npm install` needed — `dist/` is pre-built. Then proceed to `NEEDS_CONFIG`.
 

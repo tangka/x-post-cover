@@ -35,23 +35,15 @@ library/
 ## Setup
 
 ```bash
-# 1. Clone
-git clone https://github.com/<you>/x-post-cover
-cd x-post-cover
+# 1. Clone (no npm install needed — dist is pre-built)
+git clone https://github.com/tangka/x-post-cover ~/.x-post-cover
 
-# 2. Install dependencies
-npm install
-
-# 3. Configure
-cp .env.example .env
+# 2. Configure
+cp ~/.x-post-cover/.env.example ~/.x-post-cover/.env
 # Edit .env — set DEEPSEEK_API_KEY and LIBRARY at minimum
 
-# 4. Register the install path
-echo 'export X_COVER_HOME="'$(pwd)'"' >> ~/.zshrc
-source ~/.zshrc
-
-# 5. Install the Claude Code skill
-cp .claude/commands/x-cover.md ~/.claude/commands/
+# 3. Install the Claude Code skill
+cp ~/.x-post-cover/.claude/commands/x-cover.md ~/.claude/commands/
 ```
 
 ---
