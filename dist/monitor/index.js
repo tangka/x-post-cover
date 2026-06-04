@@ -1,6 +1,732 @@
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
+/***/ 3909:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const fs = __nccwpck_require__(9896);
+const path = __nccwpck_require__(6928);
+const util = __nccwpck_require__(2952);
+const SqliteError = __nccwpck_require__(7483);
+
+let DEFAULT_ADDON;
+
+function Database(filenameGiven, options) {
+	if (new.target == null) {
+		return new Database(filenameGiven, options);
+	}
+
+	// Apply defaults
+	let buffer;
+	if (Buffer.isBuffer(filenameGiven)) {
+		buffer = filenameGiven;
+		filenameGiven = ':memory:';
+	}
+	if (filenameGiven == null) filenameGiven = '';
+	if (options == null) options = {};
+
+	// Validate arguments
+	if (typeof filenameGiven !== 'string') throw new TypeError('Expected first argument to be a string');
+	if (typeof options !== 'object') throw new TypeError('Expected second argument to be an options object');
+	if ('readOnly' in options) throw new TypeError('Misspelled option "readOnly" should be "readonly"');
+	if ('memory' in options) throw new TypeError('Option "memory" was removed in v7.0.0 (use ":memory:" filename instead)');
+
+	// Interpret options
+	const filename = filenameGiven.trim();
+	const anonymous = filename === '' || filename === ':memory:';
+	const readonly = util.getBooleanOption(options, 'readonly');
+	const fileMustExist = util.getBooleanOption(options, 'fileMustExist');
+	const timeout = 'timeout' in options ? options.timeout : 5000;
+	const verbose = 'verbose' in options ? options.verbose : null;
+	const nativeBinding = 'nativeBinding' in options ? options.nativeBinding : null;
+
+	// Validate interpreted options
+	if (readonly && anonymous && !buffer) throw new TypeError('In-memory/temporary databases cannot be readonly');
+	if (!Number.isInteger(timeout) || timeout < 0) throw new TypeError('Expected the "timeout" option to be a positive integer');
+	if (timeout > 0x7fffffff) throw new RangeError('Option "timeout" cannot be greater than 2147483647');
+	if (verbose != null && typeof verbose !== 'function') throw new TypeError('Expected the "verbose" option to be a function');
+	if (nativeBinding != null && typeof nativeBinding !== 'string' && typeof nativeBinding !== 'object') throw new TypeError('Expected the "nativeBinding" option to be a string or addon object');
+
+	// Load the native addon
+	let addon;
+	if (nativeBinding == null) {
+		addon = DEFAULT_ADDON || (DEFAULT_ADDON = require(__nccwpck_require__.ab + "build/Release/better_sqlite3.node"));
+	} else if (typeof nativeBinding === 'string') {
+		// See <https://webpack.js.org/api/module-variables/#__non_webpack_require__-webpack-specific>
+		const requireFunc = typeof require === 'function' ? eval("require") : require;
+		addon = requireFunc(path.resolve(nativeBinding).replace(/(\.node)?$/, '.node'));
+	} else {
+		// See <https://github.com/WiseLibs/better-sqlite3/issues/972>
+		addon = nativeBinding;
+	}
+
+	if (!addon.isInitialized) {
+		addon.setErrorConstructor(SqliteError);
+		addon.isInitialized = true;
+	}
+
+	// Make sure the specified directory exists
+	if (!anonymous && !filename.startsWith('file:') && !fs.existsSync(path.dirname(filename))) {
+		throw new TypeError('Cannot open database because the directory does not exist');
+	}
+
+	Object.defineProperties(this, {
+		[util.cppdb]: { value: new addon.Database(filename, filenameGiven, anonymous, readonly, fileMustExist, timeout, verbose || null, buffer || null) },
+		...wrappers.getters,
+	});
+}
+
+const wrappers = __nccwpck_require__(5463);
+Database.prototype.prepare = wrappers.prepare;
+Database.prototype.transaction = __nccwpck_require__(6695);
+Database.prototype.pragma = __nccwpck_require__(8127);
+Database.prototype.backup = __nccwpck_require__(6017);
+Database.prototype.serialize = __nccwpck_require__(2161);
+Database.prototype.function = __nccwpck_require__(3943);
+Database.prototype.aggregate = __nccwpck_require__(4096);
+Database.prototype.table = __nccwpck_require__(1355);
+Database.prototype.loadExtension = wrappers.loadExtension;
+Database.prototype.exec = wrappers.exec;
+Database.prototype.close = wrappers.close;
+Database.prototype.defaultSafeIntegers = wrappers.defaultSafeIntegers;
+Database.prototype.unsafeMode = wrappers.unsafeMode;
+Database.prototype[util.inspect] = __nccwpck_require__(9595);
+
+module.exports = Database;
+
+
+/***/ }),
+
+/***/ 4918:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+module.exports = __nccwpck_require__(3909);
+module.exports.SqliteError = __nccwpck_require__(7483);
+
+
+/***/ }),
+
+/***/ 4096:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const { getBooleanOption, cppdb } = __nccwpck_require__(2952);
+
+module.exports = function defineAggregate(name, options) {
+	// Validate arguments
+	if (typeof name !== 'string') throw new TypeError('Expected first argument to be a string');
+	if (typeof options !== 'object' || options === null) throw new TypeError('Expected second argument to be an options object');
+	if (!name) throw new TypeError('User-defined function name cannot be an empty string');
+
+	// Interpret options
+	const start = 'start' in options ? options.start : null;
+	const step = getFunctionOption(options, 'step', true);
+	const inverse = getFunctionOption(options, 'inverse', false);
+	const result = getFunctionOption(options, 'result', false);
+	const safeIntegers = 'safeIntegers' in options ? +getBooleanOption(options, 'safeIntegers') : 2;
+	const deterministic = getBooleanOption(options, 'deterministic');
+	const directOnly = getBooleanOption(options, 'directOnly');
+	const varargs = getBooleanOption(options, 'varargs');
+	let argCount = -1;
+
+	// Determine argument count
+	if (!varargs) {
+		argCount = Math.max(getLength(step), inverse ? getLength(inverse) : 0);
+		if (argCount > 0) argCount -= 1;
+		if (argCount > 100) throw new RangeError('User-defined functions cannot have more than 100 arguments');
+	}
+
+	this[cppdb].aggregate(start, step, inverse, result, name, argCount, safeIntegers, deterministic, directOnly);
+	return this;
+};
+
+const getFunctionOption = (options, key, required) => {
+	const value = key in options ? options[key] : null;
+	if (typeof value === 'function') return value;
+	if (value != null) throw new TypeError(`Expected the "${key}" option to be a function`);
+	if (required) throw new TypeError(`Missing required option "${key}"`);
+	return null;
+};
+
+const getLength = ({ length }) => {
+	if (Number.isInteger(length) && length >= 0) return length;
+	throw new TypeError('Expected function.length to be a positive integer');
+};
+
+
+/***/ }),
+
+/***/ 6017:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const fs = __nccwpck_require__(9896);
+const path = __nccwpck_require__(6928);
+const { promisify } = __nccwpck_require__(9023);
+const { cppdb } = __nccwpck_require__(2952);
+const fsAccess = promisify(fs.access);
+
+module.exports = async function backup(filename, options) {
+	if (options == null) options = {};
+
+	// Validate arguments
+	if (typeof filename !== 'string') throw new TypeError('Expected first argument to be a string');
+	if (typeof options !== 'object') throw new TypeError('Expected second argument to be an options object');
+
+	// Interpret options
+	filename = filename.trim();
+	const attachedName = 'attached' in options ? options.attached : 'main';
+	const handler = 'progress' in options ? options.progress : null;
+
+	// Validate interpreted options
+	if (!filename) throw new TypeError('Backup filename cannot be an empty string');
+	if (filename === ':memory:') throw new TypeError('Invalid backup filename ":memory:"');
+	if (typeof attachedName !== 'string') throw new TypeError('Expected the "attached" option to be a string');
+	if (!attachedName) throw new TypeError('The "attached" option cannot be an empty string');
+	if (handler != null && typeof handler !== 'function') throw new TypeError('Expected the "progress" option to be a function');
+
+	// Make sure the specified directory exists
+	await fsAccess(path.dirname(filename)).catch(() => {
+		throw new TypeError('Cannot save backup because the directory does not exist');
+	});
+
+	const isNewFile = await fsAccess(filename).then(() => false, () => true);
+	return runBackup(this[cppdb].backup(this, attachedName, filename, isNewFile), handler || null);
+};
+
+const runBackup = (backup, handler) => {
+	let rate = 0;
+	let useDefault = true;
+
+	return new Promise((resolve, reject) => {
+		setImmediate(function step() {
+			try {
+				const progress = backup.transfer(rate);
+				if (!progress.remainingPages) {
+					backup.close();
+					resolve(progress);
+					return;
+				}
+				if (useDefault) {
+					useDefault = false;
+					rate = 100;
+				}
+				if (handler) {
+					const ret = handler(progress);
+					if (ret !== undefined) {
+						if (typeof ret === 'number' && ret === ret) rate = Math.max(0, Math.min(0x7fffffff, Math.round(ret)));
+						else throw new TypeError('Expected progress callback to return a number or undefined');
+					}
+				}
+				setImmediate(step);
+			} catch (err) {
+				backup.close();
+				reject(err);
+			}
+		});
+	});
+};
+
+
+/***/ }),
+
+/***/ 3943:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const { getBooleanOption, cppdb } = __nccwpck_require__(2952);
+
+module.exports = function defineFunction(name, options, fn) {
+	// Apply defaults
+	if (options == null) options = {};
+	if (typeof options === 'function') { fn = options; options = {}; }
+
+	// Validate arguments
+	if (typeof name !== 'string') throw new TypeError('Expected first argument to be a string');
+	if (typeof fn !== 'function') throw new TypeError('Expected last argument to be a function');
+	if (typeof options !== 'object') throw new TypeError('Expected second argument to be an options object');
+	if (!name) throw new TypeError('User-defined function name cannot be an empty string');
+
+	// Interpret options
+	const safeIntegers = 'safeIntegers' in options ? +getBooleanOption(options, 'safeIntegers') : 2;
+	const deterministic = getBooleanOption(options, 'deterministic');
+	const directOnly = getBooleanOption(options, 'directOnly');
+	const varargs = getBooleanOption(options, 'varargs');
+	let argCount = -1;
+
+	// Determine argument count
+	if (!varargs) {
+		argCount = fn.length;
+		if (!Number.isInteger(argCount) || argCount < 0) throw new TypeError('Expected function.length to be a positive integer');
+		if (argCount > 100) throw new RangeError('User-defined functions cannot have more than 100 arguments');
+	}
+
+	this[cppdb].function(fn, name, argCount, safeIntegers, deterministic, directOnly);
+	return this;
+};
+
+
+/***/ }),
+
+/***/ 9595:
+/***/ ((module) => {
+
+"use strict";
+
+const DatabaseInspection = function Database() {};
+
+module.exports = function inspect(depth, opts) {
+	return Object.assign(new DatabaseInspection(), this);
+};
+
+
+
+/***/ }),
+
+/***/ 8127:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const { getBooleanOption, cppdb } = __nccwpck_require__(2952);
+
+module.exports = function pragma(source, options) {
+	if (options == null) options = {};
+	if (typeof source !== 'string') throw new TypeError('Expected first argument to be a string');
+	if (typeof options !== 'object') throw new TypeError('Expected second argument to be an options object');
+	const simple = getBooleanOption(options, 'simple');
+
+	const stmt = this[cppdb].prepare(`PRAGMA ${source}`, this, true);
+	return simple ? stmt.pluck().get() : stmt.all();
+};
+
+
+/***/ }),
+
+/***/ 2161:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const { cppdb } = __nccwpck_require__(2952);
+
+module.exports = function serialize(options) {
+	if (options == null) options = {};
+
+	// Validate arguments
+	if (typeof options !== 'object') throw new TypeError('Expected first argument to be an options object');
+
+	// Interpret and validate options
+	const attachedName = 'attached' in options ? options.attached : 'main';
+	if (typeof attachedName !== 'string') throw new TypeError('Expected the "attached" option to be a string');
+	if (!attachedName) throw new TypeError('The "attached" option cannot be an empty string');
+
+	return this[cppdb].serialize(attachedName);
+};
+
+
+/***/ }),
+
+/***/ 1355:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const { cppdb } = __nccwpck_require__(2952);
+
+module.exports = function defineTable(name, factory) {
+	// Validate arguments
+	if (typeof name !== 'string') throw new TypeError('Expected first argument to be a string');
+	if (!name) throw new TypeError('Virtual table module name cannot be an empty string');
+
+	// Determine whether the module is eponymous-only or not
+	let eponymous = false;
+	if (typeof factory === 'object' && factory !== null) {
+		eponymous = true;
+		factory = defer(parseTableDefinition(factory, 'used', name));
+	} else {
+		if (typeof factory !== 'function') throw new TypeError('Expected second argument to be a function or a table definition object');
+		factory = wrapFactory(factory);
+	}
+
+	this[cppdb].table(factory, name, eponymous);
+	return this;
+};
+
+function wrapFactory(factory) {
+	return function virtualTableFactory(moduleName, databaseName, tableName, ...args) {
+		const thisObject = {
+			module: moduleName,
+			database: databaseName,
+			table: tableName,
+		};
+
+		// Generate a new table definition by invoking the factory
+		const def = apply.call(factory, thisObject, args);
+		if (typeof def !== 'object' || def === null) {
+			throw new TypeError(`Virtual table module "${moduleName}" did not return a table definition object`);
+		}
+
+		return parseTableDefinition(def, 'returned', moduleName);
+	};
+}
+
+function parseTableDefinition(def, verb, moduleName) {
+	// Validate required properties
+	if (!hasOwnProperty.call(def, 'rows')) {
+		throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition without a "rows" property`);
+	}
+	if (!hasOwnProperty.call(def, 'columns')) {
+		throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition without a "columns" property`);
+	}
+
+	// Validate "rows" property
+	const rows = def.rows;
+	if (typeof rows !== 'function' || Object.getPrototypeOf(rows) !== GeneratorFunctionPrototype) {
+		throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition with an invalid "rows" property (should be a generator function)`);
+	}
+
+	// Validate "columns" property
+	let columns = def.columns;
+	if (!Array.isArray(columns) || !(columns = [...columns]).every(x => typeof x === 'string')) {
+		throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition with an invalid "columns" property (should be an array of strings)`);
+	}
+	if (columns.length !== new Set(columns).size) {
+		throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition with duplicate column names`);
+	}
+	if (!columns.length) {
+		throw new RangeError(`Virtual table module "${moduleName}" ${verb} a table definition with zero columns`);
+	}
+
+	// Validate "parameters" property
+	let parameters;
+	if (hasOwnProperty.call(def, 'parameters')) {
+		parameters = def.parameters;
+		if (!Array.isArray(parameters) || !(parameters = [...parameters]).every(x => typeof x === 'string')) {
+			throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition with an invalid "parameters" property (should be an array of strings)`);
+		}
+	} else {
+		parameters = inferParameters(rows);
+	}
+	if (parameters.length !== new Set(parameters).size) {
+		throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition with duplicate parameter names`);
+	}
+	if (parameters.length > 32) {
+		throw new RangeError(`Virtual table module "${moduleName}" ${verb} a table definition with more than the maximum number of 32 parameters`);
+	}
+	for (const parameter of parameters) {
+		if (columns.includes(parameter)) {
+			throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition with column "${parameter}" which was ambiguously defined as both a column and parameter`);
+		}
+	}
+
+	// Validate "safeIntegers" option
+	let safeIntegers = 2;
+	if (hasOwnProperty.call(def, 'safeIntegers')) {
+		const bool = def.safeIntegers;
+		if (typeof bool !== 'boolean') {
+			throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition with an invalid "safeIntegers" property (should be a boolean)`);
+		}
+		safeIntegers = +bool;
+	}
+
+	// Validate "directOnly" option
+	let directOnly = false;
+	if (hasOwnProperty.call(def, 'directOnly')) {
+		directOnly = def.directOnly;
+		if (typeof directOnly !== 'boolean') {
+			throw new TypeError(`Virtual table module "${moduleName}" ${verb} a table definition with an invalid "directOnly" property (should be a boolean)`);
+		}
+	}
+
+	// Generate SQL for the virtual table definition
+	const columnDefinitions = [
+		...parameters.map(identifier).map(str => `${str} HIDDEN`),
+		...columns.map(identifier),
+	];
+	return [
+		`CREATE TABLE x(${columnDefinitions.join(', ')});`,
+		wrapGenerator(rows, new Map(columns.map((x, i) => [x, parameters.length + i])), moduleName),
+		parameters,
+		safeIntegers,
+		directOnly,
+	];
+}
+
+function wrapGenerator(generator, columnMap, moduleName) {
+	return function* virtualTable(...args) {
+		/*
+			We must defensively clone any buffers in the arguments, because
+			otherwise the generator could mutate one of them, which would cause
+			us to return incorrect values for hidden columns, potentially
+			corrupting the database.
+		 */
+		const output = args.map(x => Buffer.isBuffer(x) ? Buffer.from(x) : x);
+		for (let i = 0; i < columnMap.size; ++i) {
+			output.push(null); // Fill with nulls to prevent gaps in array (v8 optimization)
+		}
+		for (const row of generator(...args)) {
+			if (Array.isArray(row)) {
+				extractRowArray(row, output, columnMap.size, moduleName);
+				yield output;
+			} else if (typeof row === 'object' && row !== null) {
+				extractRowObject(row, output, columnMap, moduleName);
+				yield output;
+			} else {
+				throw new TypeError(`Virtual table module "${moduleName}" yielded something that isn't a valid row object`);
+			}
+		}
+	};
+}
+
+function extractRowArray(row, output, columnCount, moduleName) {
+	if (row.length !== columnCount) {
+		throw new TypeError(`Virtual table module "${moduleName}" yielded a row with an incorrect number of columns`);
+	}
+	const offset = output.length - columnCount;
+	for (let i = 0; i < columnCount; ++i) {
+		output[i + offset] = row[i];
+	}
+}
+
+function extractRowObject(row, output, columnMap, moduleName) {
+	let count = 0;
+	for (const key of Object.keys(row)) {
+		const index = columnMap.get(key);
+		if (index === undefined) {
+			throw new TypeError(`Virtual table module "${moduleName}" yielded a row with an undeclared column "${key}"`);
+		}
+		output[index] = row[key];
+		count += 1;
+	}
+	if (count !== columnMap.size) {
+		throw new TypeError(`Virtual table module "${moduleName}" yielded a row with missing columns`);
+	}
+}
+
+function inferParameters({ length }) {
+	if (!Number.isInteger(length) || length < 0) {
+		throw new TypeError('Expected function.length to be a positive integer');
+	}
+	const params = [];
+	for (let i = 0; i < length; ++i) {
+		params.push(`$${i + 1}`);
+	}
+	return params;
+}
+
+const { hasOwnProperty } = Object.prototype;
+const { apply } = Function.prototype;
+const GeneratorFunctionPrototype = Object.getPrototypeOf(function*(){});
+const identifier = str => `"${str.replace(/"/g, '""')}"`;
+const defer = x => () => x;
+
+
+/***/ }),
+
+/***/ 6695:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const { cppdb } = __nccwpck_require__(2952);
+const controllers = new WeakMap();
+
+module.exports = function transaction(fn) {
+	if (typeof fn !== 'function') throw new TypeError('Expected first argument to be a function');
+
+	const db = this[cppdb];
+	const controller = getController(db, this);
+	const { apply } = Function.prototype;
+
+	// Each version of the transaction function has these same properties
+	const properties = {
+		default: { value: wrapTransaction(apply, fn, db, controller.default) },
+		deferred: { value: wrapTransaction(apply, fn, db, controller.deferred) },
+		immediate: { value: wrapTransaction(apply, fn, db, controller.immediate) },
+		exclusive: { value: wrapTransaction(apply, fn, db, controller.exclusive) },
+		database: { value: this, enumerable: true },
+	};
+
+	Object.defineProperties(properties.default.value, properties);
+	Object.defineProperties(properties.deferred.value, properties);
+	Object.defineProperties(properties.immediate.value, properties);
+	Object.defineProperties(properties.exclusive.value, properties);
+
+	// Return the default version of the transaction function
+	return properties.default.value;
+};
+
+// Return the database's cached transaction controller, or create a new one
+const getController = (db, self) => {
+	let controller = controllers.get(db);
+	if (!controller) {
+		const shared = {
+			commit: db.prepare('COMMIT', self, false),
+			rollback: db.prepare('ROLLBACK', self, false),
+			savepoint: db.prepare('SAVEPOINT `\t_bs3.\t`', self, false),
+			release: db.prepare('RELEASE `\t_bs3.\t`', self, false),
+			rollbackTo: db.prepare('ROLLBACK TO `\t_bs3.\t`', self, false),
+		};
+		controllers.set(db, controller = {
+			default: Object.assign({ begin: db.prepare('BEGIN', self, false) }, shared),
+			deferred: Object.assign({ begin: db.prepare('BEGIN DEFERRED', self, false) }, shared),
+			immediate: Object.assign({ begin: db.prepare('BEGIN IMMEDIATE', self, false) }, shared),
+			exclusive: Object.assign({ begin: db.prepare('BEGIN EXCLUSIVE', self, false) }, shared),
+		});
+	}
+	return controller;
+};
+
+// Return a new transaction function by wrapping the given function
+const wrapTransaction = (apply, fn, db, { begin, commit, rollback, savepoint, release, rollbackTo }) => function sqliteTransaction() {
+	let before, after, undo;
+	if (db.inTransaction) {
+		before = savepoint;
+		after = release;
+		undo = rollbackTo;
+	} else {
+		before = begin;
+		after = commit;
+		undo = rollback;
+	}
+	before.run();
+	try {
+		const result = apply.call(fn, this, arguments);
+		if (result && typeof result.then === 'function') {
+			throw new TypeError('Transaction function cannot return a promise');
+		}
+		after.run();
+		return result;
+	} catch (ex) {
+		if (db.inTransaction) {
+			undo.run();
+			if (undo !== rollback) after.run();
+		}
+		throw ex;
+	}
+};
+
+
+/***/ }),
+
+/***/ 5463:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+const { cppdb } = __nccwpck_require__(2952);
+
+exports.prepare = function prepare(sql) {
+	return this[cppdb].prepare(sql, this, false);
+};
+
+exports.exec = function exec(sql) {
+	this[cppdb].exec(sql);
+	return this;
+};
+
+exports.close = function close() {
+	this[cppdb].close();
+	return this;
+};
+
+exports.loadExtension = function loadExtension(...args) {
+	this[cppdb].loadExtension(...args);
+	return this;
+};
+
+exports.defaultSafeIntegers = function defaultSafeIntegers(...args) {
+	this[cppdb].defaultSafeIntegers(...args);
+	return this;
+};
+
+exports.unsafeMode = function unsafeMode(...args) {
+	this[cppdb].unsafeMode(...args);
+	return this;
+};
+
+exports.getters = {
+	name: {
+		get: function name() { return this[cppdb].name; },
+		enumerable: true,
+	},
+	open: {
+		get: function open() { return this[cppdb].open; },
+		enumerable: true,
+	},
+	inTransaction: {
+		get: function inTransaction() { return this[cppdb].inTransaction; },
+		enumerable: true,
+	},
+	readonly: {
+		get: function readonly() { return this[cppdb].readonly; },
+		enumerable: true,
+	},
+	memory: {
+		get: function memory() { return this[cppdb].memory; },
+		enumerable: true,
+	},
+};
+
+
+/***/ }),
+
+/***/ 7483:
+/***/ ((module) => {
+
+"use strict";
+
+const descriptor = { value: 'SqliteError', writable: true, enumerable: false, configurable: true };
+
+function SqliteError(message, code) {
+	if (new.target !== SqliteError) {
+		return new SqliteError(message, code);
+	}
+	if (typeof code !== 'string') {
+		throw new TypeError('Expected second argument to be a string');
+	}
+	Error.call(this, message);
+	descriptor.value = '' + message;
+	Object.defineProperty(this, 'message', descriptor);
+	Error.captureStackTrace(this, SqliteError);
+	this.code = code;
+}
+Object.setPrototypeOf(SqliteError, Error);
+Object.setPrototypeOf(SqliteError.prototype, Error.prototype);
+Object.defineProperty(SqliteError.prototype, 'name', descriptor);
+module.exports = SqliteError;
+
+
+/***/ }),
+
+/***/ 2952:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+exports.getBooleanOption = (options, key) => {
+	let value = false;
+	if (key in options && typeof (value = options[key]) !== 'boolean') {
+		throw new TypeError(`Expected the "${key}" option to be a boolean`);
+	}
+	return value;
+};
+
+exports.cppdb = Symbol();
+exports.inspect = Symbol.for('nodejs.util.inspect.custom');
+
+
+/***/ }),
+
 /***/ 2874:
 /***/ ((__unused_webpack_module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -5549,7 +6275,7 @@ function socketOnError() {
 
 /***/ }),
 
-/***/ 7265:
+/***/ 0:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -5587,13 +6313,17 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 __nccwpck_require__(2874);
-const fs = __importStar(__nccwpck_require__(9896));
+const puppeteer_core_1 = __importDefault(__nccwpck_require__(9410));
 const path = __importStar(__nccwpck_require__(6928));
-const screenshot_1 = __nccwpck_require__(5816);
-// x-cover:纯渲染。读 x-collect 产出的 post.json → 生成 public/post-data.js → 截图 → <folder>/cover.png。
-// 不再自己抓推(采集归 x-collect)。入参:推文件夹路径,或直接给 post.json 路径。
+const fs = __importStar(__nccwpck_require__(9896));
+const child_process_1 = __nccwpck_require__(5317);
+const scrape_1 = __nccwpck_require__(2732);
+// Walk up from __dirname until we find .env.example (works for both dev and dist/monitor/)
 function findRoot(dir) {
     if (fs.existsSync(path.join(dir, ".env.example")))
         return dir;
@@ -5601,104 +6331,583 @@ function findRoot(dir) {
     return parent !== dir ? findRoot(parent) : dir;
 }
 const ROOT = findRoot(__dirname);
-const DATA_OUT = path.join(ROOT, "public/post-data.js");
-function resolvePostJson(arg) {
-    const p = path.resolve(arg);
-    const stat = fs.existsSync(p) ? fs.statSync(p) : null;
-    if (stat?.isDirectory())
-        return { postPath: path.join(p, "post.json"), folder: p };
-    if (p.endsWith(".json"))
-        return { postPath: p, folder: path.dirname(p) };
-    throw new Error("入参应为推文件夹 或 post.json 路径");
+const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const WATCHLIST_FILE = path.join(ROOT, "watchlist.json");
+const SEEN_FILE = path.join(ROOT, "data/seen.json");
+function normalizeUsername(raw) {
+    // Accept "https://x.com/username", "x.com/username", "@username", or plain "username"
+    const match = raw.match(/(?:https?:\/\/)?(?:x|twitter)\.com\/([A-Za-z0-9_]+)/);
+    if (match)
+        return match[1];
+    return raw.replace(/^@/, "");
+}
+function loadWatchlist() {
+    if (!fs.existsSync(WATCHLIST_FILE)) {
+        const example = {
+            accounts: [
+                { username: "ClaudeAI", note: "example — edit watchlist.json to add real accounts" },
+            ],
+        };
+        fs.writeFileSync(WATCHLIST_FILE, JSON.stringify(example, null, 2));
+        console.log("Created watchlist.json — edit it to add accounts, then re-run.");
+        process.exit(0);
+    }
+    const wl = JSON.parse(fs.readFileSync(WATCHLIST_FILE, "utf8"));
+    wl.accounts = wl.accounts.map(a => ({ ...a, username: normalizeUsername(a.username) }));
+    return wl;
+}
+function loadSeen() {
+    try {
+        return JSON.parse(fs.readFileSync(SEEN_FILE, "utf8"));
+    }
+    catch {
+        return {};
+    }
+}
+function saveSeen(seen) {
+    fs.mkdirSync(path.dirname(SEEN_FILE), { recursive: true });
+    fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractTweets(json, username) {
+    const tweets = [];
+    // X uses both timeline_v2 and timeline depending on endpoint variant
+    const tl = json?.data?.user?.result;
+    const instructions = (tl?.timeline_v2?.timeline ?? tl?.timeline?.timeline)?.instructions ?? [];
+    for (const inst of instructions) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const entries = inst.entries ?? [];
+        for (const entry of entries) {
+            const result = entry?.content?.itemContent?.tweet_results?.result;
+            if (!result)
+                continue;
+            // unwrap TweetWithVisibilityResults
+            const tweet = result.__typename === "TweetWithVisibilityResults" ? result.tweet : result;
+            const id = tweet?.rest_id ?? tweet?.legacy?.id_str;
+            const screenName = tweet?.core?.user_results?.result?.core?.screen_name ?? username;
+            if (id)
+                tweets.push({ id, url: `https://x.com/${screenName}/status/${id}` });
+        }
+    }
+    return tweets;
+}
+async function fetchTimeline(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+page, username) {
+    const tweets = [];
+    let navFailed = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = async (response) => {
+        const url = response.url();
+        if (!url.includes("UserTweets") && !url.includes("UserTweetsAndReplies"))
+            return;
+        try {
+            const json = await response.json();
+            tweets.push(...extractTweets(json, username));
+        }
+        catch { /* ignore */ }
+    };
+    page.on("response", handler);
+    // x.com keeps background requests alive, so "networkidle2" often never settles and
+    // times out. "domcontentloaded" is enough — the response handler above captures the
+    // UserTweets payload regardless, and the wait loop below gives it time to arrive.
+    // A goto timeout must not abort: we may already have the data we need.
+    try {
+        await page.goto(`https://x.com/${username}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+    }
+    catch (e) {
+        navFailed = true;
+        console.error(`  goto warning for @${username}: ${e}`);
+    }
+    // Switch to "Latest" tab to get chronological order instead of "Top" tweets
+    try {
+        const tabs = await page.$$('[role="tab"]');
+        for (const tab of tabs) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const text = await tab.evaluate((el) => el.textContent ?? "");
+            if (/latest|最新/i.test(text)) {
+                tweets.length = 0; // discard top-tweets already captured
+                await tab.click();
+                await new Promise(r => setTimeout(r, 2000));
+                break;
+            }
+        }
+    }
+    catch { /* no tabs, proceed */ }
+    for (let i = 0; i < 20 && tweets.length === 0; i++) {
+        await new Promise(r => setTimeout(r, 500));
+    }
+    page.off("response", handler);
+    return { tweets, navFailed };
+}
+function processUrl(url) {
+    return new Promise((resolve, reject) => {
+        const child = (0, child_process_1.spawn)("node", [path.join(ROOT, "dist/index.js"), url], {
+            cwd: ROOT,
+            stdio: "inherit",
+            env: process.env,
+        });
+        child.on("close", code => code === 0 ? resolve() : reject(new Error(`exit ${code}`)));
+    });
+}
+const PROCESS_RETRIES = 3; // attempts after the first try
+const RETRY_BACKOFF_MS = [5000, 15000, 30000]; // wait before each retry
+const THROTTLE_MS = 4000; // pause between tweets to ease rate limits
+// x.com intermittently drops connections (ERR_CONNECTION_CLOSED / nav timeout),
+// especially under the burst of requests this monitor generates. Retry with
+// backoff so a transient failure doesn't permanently drop a tweet.
+async function processWithRetry(url) {
+    for (let attempt = 0; attempt <= PROCESS_RETRIES; attempt++) {
+        try {
+            await processUrl(url);
+            return true;
+        }
+        catch (e) {
+            if (attempt < PROCESS_RETRIES) {
+                const wait = RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)];
+                console.error(`  attempt ${attempt + 1} failed (${e}); retrying in ${wait / 1000}s`);
+                await new Promise(r => setTimeout(r, wait));
+            }
+            else {
+                console.error(`  gave up after ${attempt + 1} attempts: ${e}`);
+            }
+        }
+    }
+    return false;
 }
 async function main() {
-    const arg = process.argv[2];
-    if (!arg) {
-        console.error("用法: node cover.js <推文件夹 | post.json>");
-        process.exit(1);
+    // --init: mark all current tweets as seen without processing them
+    const initMode = process.argv.includes("--init");
+    const watchlist = loadWatchlist();
+    const seen = loadSeen();
+    console.log("Reading Chrome cookies...");
+    const cookies = (0, scrape_1.getXCookies)();
+    console.log(`Injecting ${cookies.length} x.com cookies`);
+    const browser = await puppeteer_core_1.default.launch({
+        executablePath: CHROME,
+        headless: true,
+        args: ["--no-sandbox"],
+    });
+    const work = [];
+    let checked = 0; // accounts whose timeline we attempted
+    let navFailures = 0; // of those, how many failed to even load (DNS/network)
+    try {
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1280, height: 900 });
+        for (const c of cookies) {
+            try {
+                await page.setCookie(c);
+            }
+            catch { /* skip invalid */ }
+        }
+        for (const account of watchlist.accounts) {
+            const { username } = account;
+            console.log(`\nChecking @${username}...`);
+            const lastSeen = seen[username] ?? "0";
+            let tweets;
+            try {
+                const res = await fetchTimeline(page, username);
+                tweets = res.tweets;
+                checked++;
+                if (res.navFailed)
+                    navFailures++;
+            }
+            catch (e) {
+                // One account's timeline failing must not abort the whole run — leave its
+                // watermark untouched and move on; it'll be retried next cycle.
+                checked++;
+                navFailures++;
+                console.error(`  skip @${username}: ${e}`);
+                continue;
+            }
+            // First time seeing this account, or explicit --init: mark as seen, skip processing
+            if (initMode || lastSeen === "0") {
+                const maxId = tweets.reduce((max, t) => BigInt(t.id) > BigInt(max) ? t.id : max, lastSeen);
+                seen[username] = maxId;
+                console.log(`  init: marked ${tweets.length} tweet(s) as seen (latest: ${maxId})`);
+                continue;
+            }
+            // Process oldest-first so the seen watermark can advance contiguously.
+            const fresh = tweets
+                .filter(t => BigInt(t.id) > BigInt(lastSeen))
+                .sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+            if (fresh.length === 0) {
+                console.log("  no new tweets");
+                continue;
+            }
+            console.log(`  ${fresh.length} new tweet(s)`);
+            work.push({ username, lastSeen, fresh });
+        }
     }
-    const { postPath, folder } = resolvePostJson(arg);
-    if (!fs.existsSync(postPath)) {
-        console.error(`找不到 ${postPath}(先跑 x-collect)`);
-        process.exit(1);
+    finally {
+        await browser.close();
     }
-    const post = JSON.parse(fs.readFileSync(postPath, "utf8"));
-    // 头像:把文件夹里的 media/avatar.jpg 拷到 public/assets/avatar.jpg 供模板加载(本地 file://,远程 URL 在国内加载不出)
-    const avatar = "assets/avatar.jpg";
-    const folderAvatar = path.join(folder, post.author.avatar || "media/avatar.jpg");
-    if (fs.existsSync(folderAvatar)) {
-        fs.copyFileSync(folderAvatar, path.join(ROOT, "public/assets/avatar.jpg"));
+    // If every account we checked failed to even load, this is a systemic network/DNS
+    // outage (e.g. Docker's embedded resolver dropping after host sleep), not "no new
+    // tweets". Make it loud so it isn't silently mistaken for a quiet cycle.
+    if (checked > 0 && navFailures === checked) {
+        console.error(`\n!!! NETWORK/DNS FAILURE: all ${checked} account(s) failed to load x.com — ` +
+            `nothing was checked this cycle. If this persists, restart the container ` +
+            `(docker restart x-post-cover-monitor-1).`);
     }
-    else {
-        console.warn("没找到本地头像,用上次的 assets/avatar.jpg");
+    // Persist init / first-time marks before the slow processing phase.
+    saveSeen(seen);
+    for (const w of work) {
+        // Advance the watermark only across a leading run of successes. As soon as a
+        // tweet fails, freeze it so that tweet (and any newer ones) are re-fetched next
+        // run instead of being silently skipped.
+        let watermark = w.lastSeen;
+        let blocked = false;
+        for (const tweet of w.fresh) {
+            console.log(`\nProcessing ${tweet.url}`);
+            const ok = await processWithRetry(tweet.url);
+            if (ok) {
+                if (!blocked)
+                    watermark = tweet.id;
+            }
+            else {
+                blocked = true;
+                console.error(`  Failed: ${tweet.url} — will retry next run`);
+            }
+            await new Promise(r => setTimeout(r, THROTTLE_MS));
+        }
+        seen[w.username] = watermark;
+        saveSeen(seen);
     }
-    const showQrcode = (process.env.QRCODE ?? "hide") === "show";
-    const data = {
-        qrcode: "assets/codexx-qrcode.jpg",
-        showQrcode,
-        avatar,
-        authorName: post.author.name,
-        handle: post.author.handle,
-        englishText: post.text_en,
-        translatedText: post.text_zh,
-        created_at: post.created_at,
-        views: post.metrics.views,
-        target_lang: post.target_lang,
-        metrics: {
-            reply_count: post.metrics.reply,
-            retweet_count: post.metrics.retweet,
-            like_count: post.metrics.like,
-        },
-    };
-    fs.writeFileSync(DATA_OUT, `window.X_POST_COVER_DATA = ${JSON.stringify(data, null, 2)};\n`);
-    const coverPath = path.join(folder, "cover.png");
-    await (0, screenshot_1.screenshot)(coverPath);
-    console.log(`\n✅ 封面:${coverPath}`);
+    console.log("\nDone.");
 }
-main();
+main().catch(e => { console.error(e); process.exit(1); });
 
 
 /***/ }),
 
-/***/ 5816:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+/***/ 2732:
+/***/ (function(module, exports, __nccwpck_require__) {
 
 "use strict";
+/* module decorator */ module = __nccwpck_require__.nmd(module);
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.screenshot = screenshot;
+exports.getXCookies = getXCookies;
+exports.scrape = scrape;
 __nccwpck_require__(2874);
 const puppeteer_core_1 = __importDefault(__nccwpck_require__(9410));
-const path_1 = __importDefault(__nccwpck_require__(6928));
-const fs_1 = __importDefault(__nccwpck_require__(9896));
+const child_process_1 = __nccwpck_require__(5317);
+const crypto = __importStar(__nccwpck_require__(6982));
+const path = __importStar(__nccwpck_require__(6928));
+const fs = __importStar(__nccwpck_require__(9896));
+const https = __importStar(__nccwpck_require__(5692));
+// Walk up from __dirname until we find the project root (.env.example)
 function findRoot(dir) {
-    if (fs_1.default.existsSync(path_1.default.join(dir, ".env.example")))
+    if (fs.existsSync(path.join(dir, ".env.example")))
         return dir;
-    const parent = path_1.default.dirname(dir);
+    const parent = path.dirname(dir);
     return parent !== dir ? findRoot(parent) : dir;
 }
 const ROOT = findRoot(__dirname);
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const HTML = path_1.default.resolve(ROOT, "public/index.html");
-async function screenshot(outFile) {
+const COOKIES_DB = process.env.COOKIES_DB ?? path.join(process.env.HOME, "Library/Application Support/Google/Chrome/Default/Cookies");
+const DATA_OUT = path.join(ROOT, "public/post-data.js");
+// BCP 47 tag → human-readable name used in the translation prompt
+const LANG_NAMES = {
+    zh: "Chinese", ja: "Japanese", ko: "Korean",
+    fr: "French", de: "German", es: "Spanish",
+    pt: "Portuguese", ru: "Russian", ar: "Arabic",
+};
+const TARGET_LANG = process.env.TARGET_LANG ?? "zh";
+const TARGET_LANG_NAME = LANG_NAMES[TARGET_LANG] ?? TARGET_LANG;
+function getXCookies() {
+    // Docker / cross-platform: use pre-exported cookies.json if present
+    const cookiesJson = path.join(ROOT, "cookies.json");
+    if (fs.existsSync(cookiesJson)) {
+        return JSON.parse(fs.readFileSync(cookiesJson, "utf8"));
+    }
+    return getXCookiesFromChrome();
+}
+// macOS-only: reads and decrypts Chrome's SQLite cookie store
+function getXCookiesFromChrome() {
+    const password = (0, child_process_1.execSync)("security find-generic-password -wa 'Chrome'", {
+        stdio: ["pipe", "pipe", "ignore"],
+    }).toString().trim();
+    const key = crypto.pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
+    const iv = Buffer.alloc(16, 0x20);
+    function decrypt(buf) {
+        if (!buf || buf.length < 4)
+            return "";
+        if (buf.slice(0, 3).toString() !== "v10")
+            return buf.toString("utf8");
+        try {
+            const d = crypto.createDecipheriv("aes-128-cbc", key, iv);
+            const decrypted = Buffer.concat([d.update(buf.slice(3)), d.final()]);
+            // Chrome prepends a 32-byte HMAC-SHA256 metadata prefix before the actual value
+            const text = decrypted.slice(32).toString("utf8");
+            return text || decrypted.toString("utf8"); // fallback if no prefix
+        }
+        catch {
+            return "";
+        }
+    }
+    const tmp = "/tmp/_chrome_cookies_scrape.db";
+    fs.copyFileSync(COOKIES_DB, tmp);
+    // Dynamic require so the macOS native .node binary is never loaded on Linux
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Database = __nccwpck_require__(4918);
+    const db = new Database(tmp, { readonly: true });
+    const rows = db.prepare(`
+    SELECT name, encrypted_value, host_key, path, is_secure, is_httponly, samesite
+    FROM cookies
+    WHERE host_key LIKE '%.x.com' OR host_key = 'x.com'
+       OR host_key LIKE '%.twitter.com' OR host_key = 'twitter.com'
+  `).all();
+    db.close();
+    const sameSiteMap = {
+        "-1": "None", 0: "None", 1: "Lax", 2: "Strict",
+    };
+    return rows
+        .map((r) => ({
+        name: r.name,
+        value: decrypt(r.encrypted_value),
+        domain: r.host_key,
+        path: r.path || "/",
+        httpOnly: Boolean(r.is_httponly),
+        secure: Boolean(r.is_secure),
+        sameSite: sameSiteMap[r.samesite] ?? "None",
+    }))
+        .filter((c) => c.value && c.name);
+}
+// --- Helpers ---
+function download(url, dest) {
+    return new Promise((resolve, reject) => {
+        const follow = (u) => {
+            https.get(u, (res) => {
+                if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                    follow(res.headers.location);
+                }
+                else {
+                    const file = fs.createWriteStream(dest);
+                    res.pipe(file).on("finish", resolve);
+                }
+            }).on("error", reject);
+        };
+        follow(url);
+    });
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function findTweetResult(obj, tweetId) {
+    if (!obj || typeof obj !== "object")
+        return null;
+    if (obj.__typename === "Tweet" && obj.rest_id === tweetId)
+        return obj;
+    if (obj.__typename === "TweetWithVisibilityResults" && obj.tweet?.rest_id === tweetId)
+        return obj.tweet;
+    for (const v of Object.values(obj)) {
+        const found = findTweetResult(v, tweetId);
+        if (found)
+            return found;
+    }
+    return null;
+}
+async function translate(paragraphs) {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        console.warn("DEEPSEEK_API_KEY not set, skipping translation");
+        return [];
+    }
+    const input = paragraphs.map((p, i) => `[${i + 1}] ${p}`).join("\n\n");
+    const body = JSON.stringify({
+        model: "deepseek-chat",
+        max_tokens: 1024,
+        messages: [{
+                role: "user",
+                content: `Translate the following tweet paragraphs into ${TARGET_LANG_NAME}. Keep paragraph numbers. Leave technical terms (Codex, ChatGPT, token, etc.) in English. Output only the translation, no explanations.\n\n${input}`,
+            }],
+    });
+    const raw = await new Promise((resolve, reject) => {
+        const req = https.request({ hostname: "api.deepseek.com", path: "/chat/completions", method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` } }, res => {
+            let data = "";
+            res.on("data", (c) => { data += c; });
+            res.on("end", () => resolve(data));
+        });
+        req.on("error", reject);
+        req.write(body);
+        req.end();
+    });
+    const json = JSON.parse(raw);
+    const text = json.choices?.[0]?.message?.content ?? "";
+    // Split on [N] markers regardless of surrounding whitespace
+    return text
+        .split(/(?=\[\d+\])/)
+        .map(s => s.replace(/^\[\d+\]\s*/, "").trim())
+        .filter(Boolean);
+}
+function fmtCount(n) {
+    const num = parseInt(String(n), 10);
+    if (isNaN(num))
+        return "";
+    if (num >= 1_000_000)
+        return (num / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+    if (num >= 1_000)
+        return (num / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
+    return String(num);
+}
+function writeDebug(data, status) {
+    const dir = path.join(ROOT, "debug");
+    fs.mkdirSync(dir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = path.join(dir, `${ts}_${status}.json`);
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+    return file;
+}
+// --- Main ---
+async function scrape(tweetUrl) {
+    console.log("Reading Chrome cookies...");
+    const cookies = getXCookies();
+    console.log(`Injecting ${cookies.length} x.com cookies`);
     const browser = await puppeteer_core_1.default.launch({
         executablePath: CHROME,
+        headless: true,
         args: ["--no-sandbox"],
     });
     const page = await browser.newPage();
-    await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: 2 });
-    await page.goto(`file://${HTML}`, { waitUntil: "networkidle0" });
-    const cover = await page.$(".cover");
-    if (!cover)
-        throw new Error(".cover element not found");
-    await cover.screenshot({ path: outFile, omitBackground: false });
+    await page.setViewport({ width: 1280, height: 900 });
+    for (const c of cookies) {
+        try {
+            await page.setCookie(c);
+        }
+        catch { /* skip invalid */ }
+    }
+    let tweetData = null;
+    page.on("response", async (response) => {
+        const url = response.url();
+        if (!url.includes("TweetDetail") && !url.includes("TweetResultByRestId"))
+            return;
+        try {
+            const json = await response.json();
+            if (!tweetData)
+                tweetData = json;
+        }
+        catch { /* ignore */ }
+    });
+    console.log("Loading tweet...");
+    await page.goto(tweetUrl, { waitUntil: "networkidle2", timeout: 30000 });
+    for (let i = 0; i < 20 && !tweetData; i++) {
+        await new Promise(r => setTimeout(r, 500));
+    }
     await browser.close();
-    console.log(outFile);
+    if (!tweetData) {
+        console.error(`No GraphQL data intercepted. Debug written to ${writeDebug(tweetData, "failure")}`);
+        process.exit(1);
+    }
+    const tweetId = tweetUrl.match(/status\/(\d+)/)?.[1];
+    if (!tweetId) {
+        console.error("Could not parse tweet ID from URL");
+        process.exit(1);
+    }
+    const tweet = findTweetResult(tweetData, tweetId);
+    if (!tweet) {
+        console.error(`Tweet not found in response. Debug written to ${writeDebug(tweetData, "failure")}`);
+        process.exit(1);
+    }
+    const legacy = tweet.legacy;
+    const userResult = tweet.core?.user_results?.result;
+    const user = userResult?.core ?? userResult?.legacy ?? {}; // new API structure uses .core
+    const avatarUrl = userResult?.avatar?.image_url ?? userResult?.legacy?.profile_image_url_https ?? "";
+    const views = tweet.views?.count ?? "";
+    const created_at = legacy.created_at;
+    const paragraphs = legacy.full_text
+        .replace(/https:\/\/t\.co\/\S+/g, "") // strip t.co short links
+        .trim()
+        .split(/\n\n+/)
+        .map((s) => s.replace(/\n/g, " ").trim())
+        .filter(Boolean);
+    console.log("Translating...");
+    const translatedParagraphs = await translate(paragraphs);
+    let avatarPath = "assets/avatar.jpg";
+    const avatarSrc = avatarUrl.replace(/_normal\./, "_400x400.");
+    if (avatarSrc) {
+        try {
+            await download(avatarSrc, path.join(ROOT, "public/assets", "avatar.jpg"));
+            console.log("Avatar downloaded");
+        }
+        catch {
+            avatarPath = avatarSrc;
+        }
+    }
+    const showQrcode = (process.env.QRCODE ?? "show") === "show";
+    const js = `window.X_POST_COVER_DATA = {
+  qrcode: "assets/codexx-qrcode.jpg",
+  showQrcode: ${showQrcode},
+  avatar: ${JSON.stringify(avatarPath)},
+  authorName: ${JSON.stringify(user.name ?? "")},
+  handle: ${JSON.stringify("@" + (user.screen_name ?? ""))},
+
+  englishText: ${JSON.stringify(paragraphs, null, 4).replace(/^/gm, "  ").trimStart()},
+
+  translatedText: ${JSON.stringify(translatedParagraphs, null, 4).replace(/^/gm, "  ").trimStart()},
+
+  created_at: ${JSON.stringify(created_at)},
+  views: ${parseInt(views) || 0},
+  target_lang: ${JSON.stringify(TARGET_LANG)},
+
+  metrics: {
+    reply_count: ${legacy.reply_count},
+    retweet_count: ${legacy.retweet_count},
+    like_count: ${legacy.favorite_count},
+  },
+};
+`;
+    fs.writeFileSync(DATA_OUT, js);
+    writeDebug(tweetData, "success");
+    console.log(`${path.basename(DATA_OUT)} updated`);
+    console.log(`  author:  ${user.name} @${user.screen_name}`);
+    console.log(`  date:    ${created_at}`);
+    console.log(`  views:   ${fmtCount(views)}  replies: ${legacy.reply_count}  retweets: ${legacy.retweet_count}  likes: ${legacy.favorite_count}`);
 }
-if (false) {}
+if (__nccwpck_require__.c[__nccwpck_require__.s] === module) {
+    const url = process.argv[2];
+    if (!url || !url.includes("x.com")) {
+        console.error("Usage: node scrape.js <x.com tweet URL>");
+        process.exit(1);
+    }
+    scrape(url);
+}
 
 
 /***/ }),
@@ -5732,6 +6941,14 @@ module.exports = require("assert");
 
 "use strict";
 module.exports = require("buffer");
+
+/***/ }),
+
+/***/ 5317:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("child_process");
 
 /***/ }),
 
@@ -36623,8 +37840,8 @@ function tap(observerOrNext, error, complete) {
 /******/ 		}
 /******/ 		// Create a new module (and put it into the cache)
 /******/ 		var module = __webpack_module_cache__[moduleId] = {
-/******/ 			// no module.id needed
-/******/ 			// no module.loaded needed
+/******/ 			id: moduleId,
+/******/ 			loaded: false,
 /******/ 			exports: {}
 /******/ 		};
 /******/ 	
@@ -36637,12 +37854,18 @@ function tap(observerOrNext, error, complete) {
 /******/ 			if(threw) delete __webpack_module_cache__[moduleId];
 /******/ 		}
 /******/ 	
+/******/ 		// Flag the module as loaded
+/******/ 		module.loaded = true;
+/******/ 	
 /******/ 		// Return the exports of the module
 /******/ 		return module.exports;
 /******/ 	}
 /******/ 	
 /******/ 	// expose the modules object (__webpack_modules__)
 /******/ 	__nccwpck_require__.m = __webpack_modules__;
+/******/ 	
+/******/ 	// expose the module cache
+/******/ 	__nccwpck_require__.c = __webpack_module_cache__;
 /******/ 	
 /************************************************************************/
 /******/ 	/* webpack/runtime/create fake namespace object */
@@ -36725,6 +37948,15 @@ function tap(observerOrNext, error, complete) {
 /******/ 		};
 /******/ 	})();
 /******/ 	
+/******/ 	/* webpack/runtime/node module decorator */
+/******/ 	(() => {
+/******/ 		__nccwpck_require__.nmd = (module) => {
+/******/ 			module.paths = [];
+/******/ 			if (!module.children) module.children = [];
+/******/ 			return module;
+/******/ 		};
+/******/ 	})();
+/******/ 	
 /******/ 	/* webpack/runtime/compat */
 /******/ 	
 /******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";
@@ -36773,10 +38005,10 @@ function tap(observerOrNext, error, complete) {
 /******/ 	
 /************************************************************************/
 /******/ 	
+/******/ 	// module cache are used so entry inlining is disabled
 /******/ 	// startup
 /******/ 	// Load entry module and return exports
-/******/ 	// This entry module is referenced by other modules so it can't be inlined
-/******/ 	var __webpack_exports__ = __nccwpck_require__(7265);
+/******/ 	var __webpack_exports__ = __nccwpck_require__(__nccwpck_require__.s = 0);
 /******/ 	module.exports = __webpack_exports__;
 /******/ 	
 /******/ })()

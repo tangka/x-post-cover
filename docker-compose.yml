@@ -1,0 +1,19 @@
+services:
+  monitor:
+    build: .
+    restart: always
+    # Pin public resolvers — Docker Desktop's embedded DNS (127.0.0.11) can drop
+    # after host sleep/network changes, which silently breaks all x.com lookups.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    env_file: .env
+    environment:
+      LIBRARY: /library
+      CHROME: /usr/bin/chromium
+    volumes:
+      - ./dist:/app/dist:ro
+      - ./cookies.json:/app/cookies.json:ro
+      - ./watchlist.json:/app/watchlist.json:ro
+      - ./data:/app/data
+      - ${LIBRARY}:/library
