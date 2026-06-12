@@ -15,7 +15,6 @@ data/
 cookies.json
 
 # source — kept locally but not distributed
-*.ts
 tsconfig.json
 package.json
 package-lock.json
