@@ -1,0 +1,7 @@
+interface:
+  display_name: "X Cover"
+  short_description: "Render a WeChat cover card from an X (Twitter) post"
+  default_prompt: "/x-cover <X post URL>"
+
+policy:
+  allow_implicit_invocation: true
