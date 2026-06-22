@@ -80,3 +80,16 @@ npm run cover -- https://x.com/someone/status/123456789
 ## License
 
 MIT
+
+## 📣 关于作者 & 支持
+
+这套工具来自我运营的两个公众号,欢迎关注 👇
+
+- **Codexx** —— Codex 铁粉中文社区(扫下方二维码关注)
+- **ClaudeDevs** —— Claude 中文社区(微信搜索「Claude 中文社区」关注)
+
+<img src="promo/codexx-qrcode.jpg" width="160" alt="Codexx 公众号">
+
+如果这些工具帮到你,欢迎请我喝杯咖啡 ☕
+
+<img src="promo/wx_qr.png" width="200" alt="微信"> &nbsp;&nbsp; <img src="promo/ali_qr.png" width="200" alt="支付宝">
