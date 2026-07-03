@@ -20,6 +20,12 @@ library/
     └── content.md     ← original text + translation + metadata
 ```
 
+## Optional: TweetClaw Source Queue
+
+If TweetClaw or Xquik is already tracking public X posts, use it upstream to shortlist the URLs and notes you want to turn into WeChat assets. Keep the queue public-data only, for example `url`, `reason`, `source`, and `checkedAt`. Then run `x-collect` for the selected URL and pass the resulting folder to `x-cover`.
+
+Do not save account cookies, translation credentials, or proxy settings in the queue. This repo still owns only the cover rendering step.
+
 ---
 
 ## Requirements

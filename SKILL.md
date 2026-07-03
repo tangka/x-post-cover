@@ -6,6 +6,10 @@ user-invocable: true
 
 纯渲染封面卡:读 `x-collect` 产出的 `post.json` → `cover.png`(落同一推文件夹)。**不抓推**,采集请先用 `/x-collect`。
 
+## 可选上游: TweetClaw/Xquik
+
+如已用 TweetClaw 或 Xquik 跟踪公开 X 推文,先在那里筛出 URL 和备注,再运行 `/x-collect <url>` 生成 `post.json`,最后把文件夹交给 `/x-cover`。队列只保留 `url`、`reason`、`source`、`checkedAt` 这类公开上下文;不要保存 Cookie、翻译凭据或代理配置。本 skill 仍然只负责封面渲染。
+
 ## Step 1 — bootstrap check
 
 ```bash
